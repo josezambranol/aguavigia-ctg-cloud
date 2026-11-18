@@ -130,7 +130,7 @@ fi
 # 7. Start Spring Boot Backend with live Acuacar & press ingestion (INGESTA_MODO=auto)
 echo "[5/5] Starting Spring Boot Backend in REAL mode (INGESTA_MODO=auto) on 127.0.0.1:8080..."
 cd /app
-DEFAULT_JAVA_OPTS="-Xms64m -Xmx245m -XX:MaxMetaspaceSize=88m -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Xss256k -Daguavigia.mongo.max-pool=8 -Daguavigia.ingesta.modo=auto -Daguavigia.ingesta.acuacar.tamanio-pagina=25 -Daguavigia.siembra.vecinos-sinteticos=0 -Daguavigia.sql.copia-retraso-inicial-ms=30000 -Daguavigia.ingesta.retraso-inicial-ms=15000"
+DEFAULT_JAVA_OPTS="-Xms64m -Xmx215m -XX:MaxMetaspaceSize=128m -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Xss256k -Daguavigia.mongo.max-pool=8 -Daguavigia.ingesta.modo=auto -Daguavigia.ingesta.acuacar.tamanio-pagina=25 -Daguavigia.siembra.vecinos-sinteticos=0 -Daguavigia.sql.copia-retraso-inicial-ms=10000 -Daguavigia.ingesta.retraso-inicial-ms=25000"
 JAVA_RUN_OPTS="${CLOUD_JAVA_OPTS:-$DEFAULT_JAVA_OPTS}"
 
 while true; do
