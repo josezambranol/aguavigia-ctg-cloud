@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: aguavigia-ctg
+    runtime: docker
+    plan: free
+    healthCheckPath: /healthz
+    envVars:
+      - key: PORT
+        value: "10000"
+      - key: SPRING_PROFILES_ACTIVE
+        value: "docker"
+      - key: INGESTA_MODO
+        value: "auto"
+      - key: VECINOS_SINTETICOS
+        value: "300"
+      - key: AGUAVIGIA_CONSENSO_REDES_MINIMAS
+        value: "1"
+      - key: JAVA_MEM_OPTS
+        value: "-Xms96m -Xmx260m -XX:MaxMetaspaceSize=88m -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError"

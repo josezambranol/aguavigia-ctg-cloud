@@ -1,0 +1,2 @@
+var e={pantalla:`_pantalla_zxvm3_5`,lado:`_lado_zxvm3_9`,marca:`_marca_zxvm3_17`,rotuloMarca:`_rotuloMarca_zxvm3_18`,presentacion:`_presentacion_zxvm3_19`,filete:`_filete_zxvm3_20`,titular:`_titular_zxvm3_21`,entrada:`_entrada_zxvm3_22`,pasos:`_pasos_zxvm3_25`,numero:`_numero_zxvm3_28`,acceso:`_acceso_zxvm3_30`,volver:`_volver_zxvm3_31`,formulario:`_formulario_zxvm3_34`,tarjeta:`_tarjeta_zxvm3_37`,subtitulo:`_subtitulo_zxvm3_38`};export{e as t};
+//# sourceMappingURL=Ingreso.module-BmeTwqTY.js.map

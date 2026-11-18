@@ -1,0 +1,125 @@
+#!/bin/sh
+set -e
+
+echo "=== [AguaVigia CTG Cloud] Starting unified server ==="
+
+# 1. Start Gateway + Built-in SMTP (1025) + SPA Server on $PORT immediately
+export PORT="${PORT:-7860}"
+export BACKEND_HOST="127.0.0.1"
+export BACKEND_PORT="8080"
+export DIST_DIR="/app/dist"
+node /app/gateway-cloud.mjs &
+
+# 2. Start embedded Redis on 127.0.0.1:6379
+echo "[1/5] Starting embedded Redis on 127.0.0.1:6379..."
+redis-server --bind 127.0.0.1 --port 6379 --daemonize yes --save "" --appendonly no --maxmemory 24mb --maxmemory-policy allkeys-lru --dir /tmp
+
+# 3. Configure defaults for Spring Boot
+export SPRING_PROFILES_ACTIVE="${SPRING_PROFILES_ACTIVE:-docker}"
+export SERVER_PORT="8080"
+export REDIS_HOST="${REDIS_HOST:-127.0.0.1}"
+export REDIS_PORT="${REDIS_PORT:-6379}"
+export MAIL_HOST="${MAIL_HOST:-127.0.0.1}"
+export MAIL_PORT="${MAIL_PORT:-1025}"
+export COLLECTOR_USER_AGENT="${COLLECTOR_USER_AGENT:-AguaVigiaCTG-Bot/1.0 (+alertas@aguavigia.com)}"
+export INGESTA_MODO="${INGESTA_MODO:-auto}"
+export VECINOS_SINTETICOS="${VECINOS_SINTETICOS:-300}"
+export AGUAVIGIA_CONSENSO_REDES_MINIMAS="${AGUAVIGIA_CONSENSO_REDES_MINIMAS:-1}"
+export RATE_LIMIT_FACTOR="${RATE_LIMIT_FACTOR:-10}"
+
+if [ -n "$RENDER_EXTERNAL_URL" ]; then
+  export APP_URL_PUBLICA="${APP_URL_PUBLICA:-$RENDER_EXTERNAL_URL}"
+  export APP_URL_FRONTEND="${APP_URL_FRONTEND:-$RENDER_EXTERNAL_URL}"
+  export CORS_ORIGENES="${CORS_ORIGENES:-$RENDER_EXTERNAL_URL,http://localhost:5173}"
+elif [ -n "$SPACE_HOST" ]; then
+  export APP_URL_PUBLICA="https://${SPACE_HOST}"
+  export APP_URL_FRONTEND="https://${SPACE_HOST}"
+  export CORS_ORIGENES="https://${SPACE_HOST},http://localhost:5173"
+fi
+
+# 4. If MONGODB_URI is not set and local mongod is available, start embedded MongoDB Replica Set
+if [ -z "$MONGODB_URI" ] && command -v mongod >/dev/null 2>&1; then
+  echo "[2/5] Starting embedded MongoDB 7.0 Replica Set (rs0)..."
+  mkdir -p /tmp/mongo-data
+  mongod --dbpath /tmp/mongo-data --replSet rs0 --bind_ip 127.0.0.1 --port 27017 --wiredTigerCacheSizeGB 0.25 --fork --logpath /tmp/mongod.log
+  cd /app/scripts
+  node -e '
+    import("mongodb").then(async ({ MongoClient }) => {
+      const client = new MongoClient("mongodb://127.0.0.1:27017/?directConnection=true");
+      await client.connect();
+      try {
+        await client.db("admin").command({ replSetInitiate: { _id: "rs0", members: [{ _id: 0, host: "127.0.0.1:27017" }] } });
+        console.log("[Mongo] Replica Set rs0 initialized.");
+      } catch (e) {
+        console.log("[Mongo] Replica Set status:", e.message);
+      } finally {
+        await client.close();
+      }
+    });
+  '
+  sleep 2
+  export MONGODB_URI="mongodb://127.0.0.1:27017/aguavigia?replicaSet=rs0&directConnection=true"
+  export SPRING_DATA_MONGODB_URI="$MONGODB_URI"
+elif [ -n "$MONGODB_URI" ]; then
+  export SPRING_DATA_MONGODB_URI="$MONGODB_URI"
+fi
+
+# 5. If AGUAVIGIA_SQL_URL is not set and local postgres is available, start embedded PostgreSQL
+PG_BIN=$(ls -d /usr/lib/postgresql/*/bin 2>/dev/null | head -n 1)
+if [ -z "$AGUAVIGIA_SQL_URL" ] && [ -n "$PG_BIN" ]; then
+  echo "[3/5] Starting embedded PostgreSQL analytical database..."
+  export PATH="$PG_BIN:$PATH"
+  mkdir -p /tmp/pgdata /tmp/pgrun
+  if [ "$(id -u)" = "0" ]; then
+    chown -R postgres:postgres /tmp/pgdata /tmp/pgrun
+    su - postgres -c "$PG_BIN/initdb -D /tmp/pgdata --auth=trust >/dev/null 2>&1 || true"
+    su - postgres -c "$PG_BIN/pg_ctl -D /tmp/pgdata -l /tmp/pg.log -o '-k /tmp/pgrun -h 127.0.0.1 -p 5432' start" || true
+    su - postgres -c "$PG_BIN/psql -h 127.0.0.1 -p 5432 -c 'CREATE USER aguavigia WITH SUPERUSER;' postgres >/dev/null 2>&1 || true"
+    su - postgres -c "$PG_BIN/createdb -h 127.0.0.1 -p 5432 -O aguavigia aguavigia_analitica >/dev/null 2>&1 || true"
+  else
+    "$PG_BIN/initdb" -D /tmp/pgdata --auth=trust -U aguavigia >/dev/null 2>&1 || true
+    "$PG_BIN/pg_ctl" -D /tmp/pgdata -l /tmp/pg.log -o "-k /tmp/pgrun -h 127.0.0.1 -p 5432" start || true
+    "$PG_BIN/createdb" -h 127.0.0.1 -p 5432 -U aguavigia aguavigia_analitica >/dev/null 2>&1 || true
+  fi
+  export AGUAVIGIA_SQL_HABILITADO="true"
+  export AGUAVIGIA_SQL_URL="jdbc:postgresql://127.0.0.1:5432/aguavigia_analitica"
+  export AGUAVIGIA_SQL_USUARIO="aguavigia"
+elif [ -n "$AGUAVIGIA_SQL_URL" ]; then
+  export AGUAVIGIA_SQL_HABILITADO="true"
+else
+  export AGUAVIGIA_SQL_HABILITADO="${AGUAVIGIA_SQL_HABILITADO:-false}"
+fi
+
+# 6. Seed the 211 neighborhoods in background if needed
+(
+  sleep 4
+  if [ -n "$MONGODB_URI" ]; then
+    echo "[4/5] Checking / seeding 211 Cartagena neighborhoods in MongoDB..."
+    cd /app/scripts
+    node -e '
+      import("mongodb").then(async ({ MongoClient }) => {
+        const uri = process.env.MONGODB_URI;
+        const dbName = process.env.MONGODB_DB || "aguavigia";
+        const client = new MongoClient(uri);
+        try {
+          await client.connect();
+          const count = await client.db(dbName).collection("sectores").countDocuments();
+          console.log("[Seeder] Existing sectors in MongoDB:", count);
+          await client.close();
+          if (count < 211) {
+            const { spawnSync } = await import("node:child_process");
+            spawnSync("node", ["sembrar-sectores.mjs", "--permitir-remoto", "--sobre-datos-reales"], { stdio: "inherit" });
+          }
+        } catch (err) {
+          console.error("[Seeder] Warning:", err.message);
+        }
+      });
+    '
+  fi
+) &
+
+# 7. Start Spring Boot Backend
+echo "[5/5] Starting Spring Boot Backend on 127.0.0.1:8080..."
+cd /app
+JAVA_MEM_OPTS="${JAVA_MEM_OPTS:--Xms128m -Xmx384m -XX:MaxMetaspaceSize=112m -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError}"
+exec java $JAVA_MEM_OPTS -jar /app/app.jar

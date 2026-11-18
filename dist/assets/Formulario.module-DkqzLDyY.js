@@ -1,0 +1,2 @@
+var e={columna:`_columna_1w1bp_3`,rejilla:`_rejilla_1w1bp_4`,formulario:`_formulario_1w1bp_6`,aparte:`_aparte_1w1bp_8`,subtitulo:`_subtitulo_1w1bp_9`,nota:`_nota_1w1bp_10`,aviso:`_aviso_1w1bp_13`,acciones:`_acciones_1w1bp_15`,enlaceBoton:`_enlaceBoton_1w1bp_17`,pasos:`_pasos_1w1bp_22`,paso:`_paso_1w1bp_22`,secreto:`_secreto_1w1bp_28`,advertencia:`_advertencia_1w1bp_31`};export{e as t};
+//# sourceMappingURL=Formulario.module-DkqzLDyY.js.map
