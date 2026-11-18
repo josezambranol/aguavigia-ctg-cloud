@@ -10,10 +10,12 @@ services:
       - key: SPRING_PROFILES_ACTIVE
         value: "docker"
       - key: INGESTA_MODO
-        value: "auto"
+        value: "local"
       - key: VECINOS_SINTETICOS
-        value: "300"
+        value: "25"
       - key: AGUAVIGIA_CONSENSO_REDES_MINIMAS
         value: "1"
+      - key: RATE_LIMIT_FACTOR
+        value: "100"
       - key: JAVA_MEM_OPTS
-        value: "-Xms64m -Xmx195m -XX:MaxMetaspaceSize=84m -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Xss256k -XX:+ExitOnOutOfMemoryError"
+        value: "-Xms64m -Xmx220m -XX:MaxMetaspaceSize=88m -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Xss256k -Daguavigia.mongo.max-pool=8 -Daguavigia.sql.copia-retraso-inicial-ms=25000 -Daguavigia.ingesta.retraso-inicial-ms=15000"

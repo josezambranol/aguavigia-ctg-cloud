@@ -2,19 +2,20 @@
 set -e
 
 echo "=== [AguaVigia CTG Cloud] Starting unified server ==="
+export MALLOC_ARENA_MAX=1
 
 # 1. Start Gateway + Built-in SMTP (1025) + SPA Server on $PORT immediately
 export PORT="${PORT:-7860}"
 export BACKEND_HOST="127.0.0.1"
 export BACKEND_PORT="8080"
 export DIST_DIR="/app/dist"
-node --max-old-space-size=48 /app/gateway-cloud.mjs &
+node --max-old-space-size=40 /app/gateway-cloud.mjs &
 
 # 2. Start embedded Redis on 127.0.0.1:6379
 echo "[1/5] Starting embedded Redis on 127.0.0.1:6379..."
-redis-server --bind 127.0.0.1 --port 6379 --daemonize yes --save "" --appendonly no --maxmemory 12mb --maxmemory-policy allkeys-lru --dir /tmp
+redis-server --bind 127.0.0.1 --port 6379 --daemonize yes --save "" --appendonly no --maxmemory 10mb --maxmemory-policy allkeys-lru --dir /tmp
 
-# 3. Configure defaults for Spring Boot
+# 3. Configure defaults for Spring Boot (optimized for 512MB RAM cloud container)
 export SPRING_PROFILES_ACTIVE="${SPRING_PROFILES_ACTIVE:-docker}"
 export SERVER_PORT="8080"
 export REDIS_HOST="${REDIS_HOST:-127.0.0.1}"
@@ -22,10 +23,10 @@ export REDIS_PORT="${REDIS_PORT:-6379}"
 export MAIL_HOST="${MAIL_HOST:-127.0.0.1}"
 export MAIL_PORT="${MAIL_PORT:-1025}"
 export COLLECTOR_USER_AGENT="${COLLECTOR_USER_AGENT:-AguaVigiaCTG-Bot/1.0 (+alertas@aguavigia.com)}"
-export INGESTA_MODO="${INGESTA_MODO:-auto}"
-export VECINOS_SINTETICOS="${VECINOS_SINTETICOS:-300}"
+export INGESTA_MODO="${INGESTA_MODO:-local}"
+export VECINOS_SINTETICOS="${VECINOS_SINTETICOS:-25}"
 export AGUAVIGIA_CONSENSO_REDES_MINIMAS="${AGUAVIGIA_CONSENSO_REDES_MINIMAS:-1}"
-export RATE_LIMIT_FACTOR="${RATE_LIMIT_FACTOR:-10}"
+export RATE_LIMIT_FACTOR="${RATE_LIMIT_FACTOR:-100}"
 
 if [ -n "$RENDER_EXTERNAL_URL" ]; then
   export APP_URL_PUBLICA="${APP_URL_PUBLICA:-$RENDER_EXTERNAL_URL}"
@@ -52,9 +53,14 @@ if [ -z "$MONGODB_URI" ] && command -v mongod >/dev/null 2>&1; then
         console.log("[Mongo] Replica Set rs0 initialized.");
       } catch (e) {
         console.log("[Mongo] Replica Set status:", e.message);
-      } finally {
-        await client.close();
       }
+      try {
+        await client.db("admin").command({ setParameter: 1, wiredTigerEngineRuntimeConfig: "cache_size=32M" });
+        console.log("[Mongo] WiredTiger cache capped at 32MB.");
+      } catch (e) {
+        console.log("[Mongo] Cache cap note:", e.message);
+      }
+      await client.close();
     });
   '
   sleep 2
@@ -70,7 +76,7 @@ if [ -z "$AGUAVIGIA_SQL_URL" ] && [ -n "$PG_BIN" ]; then
   echo "[3/5] Starting embedded PostgreSQL analytical database..."
   export PATH="$PG_BIN:$PATH"
   mkdir -p /tmp/pgdata /tmp/pgrun
-  PG_OPTS="-k /tmp/pgrun -h 127.0.0.1 -p 5432 -c shared_buffers=16MB -c work_mem=2MB -c max_connections=15"
+  PG_OPTS="-k /tmp/pgrun -h 127.0.0.1 -p 5432 -c shared_buffers=12MB -c work_mem=1MB -c max_connections=10"
   if [ "$(id -u)" = "0" ]; then
     chown -R postgres:postgres /tmp/pgdata /tmp/pgrun
     su - postgres -c "$PG_BIN/initdb -D /tmp/pgdata --auth=trust >/dev/null 2>&1 || true"
@@ -91,7 +97,7 @@ else
   export AGUAVIGIA_SQL_HABILITADO="${AGUAVIGIA_SQL_HABILITADO:-false}"
 fi
 
-# 6. Seed the 211 neighborhoods in background if needed
+# 6. Seed the 211 neighborhoods + historical cuts + live consensus demo in background
 (
   sleep 4
   if [ -n "$MONGODB_URI" ]; then
@@ -104,23 +110,44 @@ fi
         const client = new MongoClient(uri);
         try {
           await client.connect();
-          const count = await client.db(dbName).collection("sectores").countDocuments();
-          console.log("[Seeder] Existing sectors in MongoDB:", count);
+          const db = client.db(dbName);
+          const count = await db.collection("sectores").countDocuments();
+          const cortesCount = await db.collection("cortes").countDocuments();
+          console.log("[Seeder] Existing sectors:", count, "Existing cuts:", cortesCount);
           await client.close();
+          const { spawnSync } = await import("node:child_process");
           if (count < 211) {
-            const { spawnSync } = await import("node:child_process");
             spawnSync("node", ["sembrar-sectores.mjs", "--permitir-remoto", "--sobre-datos-reales"], { stdio: "inherit" });
+          }
+          if (cortesCount === 0) {
+            spawnSync("node", ["sembrar-historico-cortes.mjs", "--permitir-remoto", "--sobre-datos-reales"], { stdio: "inherit" });
           }
         } catch (err) {
           console.error("[Seeder] Warning:", err.message);
         }
       });
     '
+    # Wait for Spring Boot to listen on 127.0.0.1:8080, then seed live citizen consensus on 4 neighborhoods
+    for i in $(seq 1 60); do
+      if curl -sf http://127.0.0.1:8080/actuator/health/readiness >/dev/null 2>&1; then
+        echo "[Seeder] Backend is ready! Running live citizen consensus demo (sembrar-demo.mjs)..."
+        API_URL="http://127.0.0.1:8080" node /app/scripts/sembrar-demo.mjs --sin-agua 2 --presion-baja 2 || true
+        break
+      fi
+      sleep 5
+    done
   fi
 ) &
 
-# 7. Start Spring Boot Backend
+# 7. Start Spring Boot Backend with supervisor loop
 echo "[5/5] Starting Spring Boot Backend on 127.0.0.1:8080..."
 cd /app
-JAVA_MEM_OPTS="${JAVA_MEM_OPTS:--Xms64m -Xmx195m -XX:MaxMetaspaceSize=84m -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Xss256k -XX:+ExitOnOutOfMemoryError}"
-exec java $JAVA_MEM_OPTS -jar /app/app.jar
+DEFAULT_JAVA_OPTS="-Xms64m -Xmx220m -XX:MaxMetaspaceSize=88m -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Xss256k -Daguavigia.mongo.max-pool=8 -Daguavigia.sql.copia-retraso-inicial-ms=25000 -Daguavigia.ingesta.retraso-inicial-ms=15000"
+JAVA_MEM_OPTS="${JAVA_MEM_OPTS:-$DEFAULT_JAVA_OPTS}"
+
+while true; do
+  java $JAVA_MEM_OPTS -jar /app/app.jar
+  EXIT_CODE=$?
+  echo "[Supervisor] Spring Boot exited with code $EXIT_CODE. Restarting in 3s..."
+  sleep 3
+done
