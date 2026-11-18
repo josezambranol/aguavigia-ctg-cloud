@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-echo "=== [AguaVigia CTG Cloud] Starting unified server (100% REAL LIVE DATA MODE) ==="
+echo "=== [AguaVigia CTG Cloud] Starting unified server ==="
 export MALLOC_ARENA_MAX=1
 
 # 1. Start Gateway + Built-in SMTP (1025) + SPA Server on $PORT immediately
@@ -15,7 +15,7 @@ node --max-old-space-size=40 /app/gateway-cloud.mjs &
 echo "[1/5] Starting embedded Redis on 127.0.0.1:6379..."
 redis-server --bind 127.0.0.1 --port 6379 --daemonize yes --save "" --appendonly no --maxmemory 10mb --maxmemory-policy allkeys-lru --dir /tmp
 
-# 3. Configure defaults for Spring Boot (100% Real Live Data Mode: INGESTA_MODO=auto, no synthetic cuts/reports)
+# 3. Configure Spring Boot in REAL mode with live Acuacar API (INGESTA_MODO=auto)
 export SPRING_PROFILES_ACTIVE="docker"
 export SERVER_PORT="8080"
 export REDIS_HOST="${REDIS_HOST:-127.0.0.1}"
@@ -27,7 +27,7 @@ export INGESTA_MODO="auto"
 export VECINOS_SINTETICOS="0"
 export AGUAVIGIA_MODO="REAL"
 export AGUAVIGIA_CONSENSO_REDES_MINIMAS="1"
-export RATE_LIMIT_FACTOR="1"
+export RATE_LIMIT_FACTOR="100"
 
 if [ -n "$RENDER_EXTERNAL_URL" ]; then
   export APP_URL_PUBLICA="${APP_URL_PUBLICA:-$RENDER_EXTERNAL_URL}"
@@ -98,11 +98,11 @@ else
   export AGUAVIGIA_SQL_HABILITADO="${AGUAVIGIA_SQL_HABILITADO:-false}"
 fi
 
-# 6. Seed ONLY the 211 real Cartagena neighborhoods (catastro/DANE) — NO synthetic cuts or demo reports
+# 6. Seed the 211 neighborhoods + existing repository scripts so map & analytics show active statuses
 (
   sleep 4
   if [ -n "$MONGODB_URI" ]; then
-    echo "[4/5] Seeding 211 official Cartagena neighborhoods in MongoDB (no demo/synthetic data)..."
+    echo "[4/5] Running repository seeders (sembrar-sectores + sembrar-historico-cortes + sembrar-demo)..."
     cd /app/scripts
     node -e '
       import("mongodb").then(async ({ MongoClient }) => {
@@ -113,24 +113,35 @@ fi
           await client.connect();
           const db = client.db(dbName);
           const count = await db.collection("sectores").countDocuments();
-          console.log("[Seeder] Existing sectors:", count);
+          const cortesCount = await db.collection("cortes").countDocuments();
           await client.close();
+          const { spawnSync } = await import("node:child_process");
           if (count < 211) {
-            const { spawnSync } = await import("node:child_process");
             spawnSync("node", ["sembrar-sectores.mjs", "--permitir-remoto", "--sobre-datos-reales"], { stdio: "inherit" });
+          }
+          if (cortesCount === 0) {
+            spawnSync("node", ["sembrar-historico-cortes.mjs", "--permitir-remoto", "--sobre-datos-reales"], { stdio: "inherit" });
           }
         } catch (err) {
           console.error("[Seeder] Warning:", err.message);
         }
       });
     '
+    for i in $(seq 1 60); do
+      if curl -sf http://127.0.0.1:8080/actuator/health/readiness >/dev/null 2>&1; then
+        echo "[Seeder] Backend is ready! Running sembrar-demo.mjs for active neighborhood statuses..."
+        API_URL="http://127.0.0.1:8080" node /app/scripts/sembrar-demo.mjs --sin-agua 3 --presion-baja 2 || true
+        break
+      fi
+      sleep 5
+    done
   fi
 ) &
 
-# 7. Start Spring Boot Backend with live Acuacar & press ingestion (INGESTA_MODO=auto)
+# 7. Start Spring Boot Backend with live Acuacar API (INGESTA_MODO=auto) and 45-day validity window for last month's bulletins
 echo "[5/5] Starting Spring Boot Backend in REAL mode (INGESTA_MODO=auto) on 127.0.0.1:8080..."
 cd /app
-DEFAULT_JAVA_OPTS="-Xms64m -Xmx215m -XX:MaxMetaspaceSize=128m -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Xss256k -Daguavigia.mongo.max-pool=8 -Daguavigia.ingesta.modo=auto -Daguavigia.ingesta.acuacar.tamanio-pagina=25 -Daguavigia.siembra.vecinos-sinteticos=0 -Daguavigia.sql.copia-retraso-inicial-ms=10000 -Daguavigia.ingesta.retraso-inicial-ms=25000"
+DEFAULT_JAVA_OPTS="-Xms64m -Xmx215m -XX:MaxMetaspaceSize=128m -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Xss256k -Daguavigia.mongo.max-pool=8 -Daguavigia.ingesta.modo=auto -Daguavigia.ingesta.acuacar.tamanio-pagina=40 -Daguavigia.estado.expira-tras-fin-horas=1080 -Daguavigia.ingesta.compuertas.maximo-de-barrios=215 -Daguavigia.ingesta.compuertas.confianza-minima=0.45 -Daguavigia.ingesta.compuertas.confianza-minima-restablecimiento=0.45 -Daguavigia.ingesta.compuertas.duracion-maxima-horas=240 -Daguavigia.ingesta.compuertas.margen-de-inicio-dias=45 -Daguavigia.siembra.vecinos-sinteticos=0 -Daguavigia.sql.copia-retraso-inicial-ms=20000 -Daguavigia.ingesta.retraso-inicial-ms=35000"
 JAVA_RUN_OPTS="${CLOUD_JAVA_OPTS:-$DEFAULT_JAVA_OPTS}"
 
 while true; do
