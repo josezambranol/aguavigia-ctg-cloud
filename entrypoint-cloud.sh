@@ -98,11 +98,11 @@ else
   export AGUAVIGIA_SQL_HABILITADO="${AGUAVIGIA_SQL_HABILITADO:-false}"
 fi
 
-# 6. Seed the 211 neighborhoods + existing repository scripts so map & analytics show active statuses
+# 6. Seed ONLY the 211 official Cartagena neighborhoods (no demo/simulated cuts or reports)
 (
   sleep 4
   if [ -n "$MONGODB_URI" ]; then
-    echo "[4/5] Running repository seeders (sembrar-sectores + sembrar-historico-cortes + sembrar-demo)..."
+    echo "[4/5] Seeding 211 official Cartagena neighborhoods in MongoDB (100% real mode, no demo scripts)..."
     cd /app/scripts
     node -e '
       import("mongodb").then(async ({ MongoClient }) => {
@@ -113,28 +113,16 @@ fi
           await client.connect();
           const db = client.db(dbName);
           const count = await db.collection("sectores").countDocuments();
-          const cortesCount = await db.collection("cortes").countDocuments();
           await client.close();
           const { spawnSync } = await import("node:child_process");
           if (count < 211) {
             spawnSync("node", ["sembrar-sectores.mjs", "--permitir-remoto", "--sobre-datos-reales"], { stdio: "inherit" });
-          }
-          if (cortesCount === 0) {
-            spawnSync("node", ["sembrar-historico-cortes.mjs", "--permitir-remoto", "--sobre-datos-reales"], { stdio: "inherit" });
           }
         } catch (err) {
           console.error("[Seeder] Warning:", err.message);
         }
       });
     '
-    for i in $(seq 1 60); do
-      if curl -sf http://127.0.0.1:8080/actuator/health/readiness >/dev/null 2>&1; then
-        echo "[Seeder] Backend is ready! Running sembrar-demo.mjs for active neighborhood statuses..."
-        API_URL="http://127.0.0.1:8080" node /app/scripts/sembrar-demo.mjs --sin-agua 3 --presion-baja 2 || true
-        break
-      fi
-      sleep 5
-    done
   fi
 ) &
 
