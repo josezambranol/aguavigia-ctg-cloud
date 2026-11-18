@@ -15,7 +15,7 @@ node --max-old-space-size=40 /app/gateway-cloud.mjs &
 echo "[1/5] Starting embedded Redis on 127.0.0.1:6379..."
 redis-server --bind 127.0.0.1 --port 6379 --daemonize yes --save "" --appendonly no --maxmemory 10mb --maxmemory-policy allkeys-lru --dir /tmp
 
-# 3. Configure Spring Boot in REAL mode with live Acuacar API (INGESTA_MODO=auto)
+# 3. Configure Spring Boot in REAL mode with live Acuacar API (INGESTA_MODO=auto) and fixed Admin/Veedor credentials
 export SPRING_PROFILES_ACTIVE="docker"
 export SERVER_PORT="8080"
 export REDIS_HOST="${REDIS_HOST:-127.0.0.1}"
@@ -28,6 +28,8 @@ export VECINOS_SINTETICOS="0"
 export AGUAVIGIA_MODO="REAL"
 export AGUAVIGIA_CONSENSO_REDES_MINIMAS="1"
 export RATE_LIMIT_FACTOR="100"
+export ADMIN_INICIAL_CORREO="admin@aguavigia.local"
+export VEEDOR_PASSWORD_HASH='$2a$10$dqqSwYzfwllDaE36FvWeheIE6paV6KGtF8EBg4NkpOHGNUH7O68Ce'
 
 if [ -n "$RENDER_EXTERNAL_URL" ]; then
   export APP_URL_PUBLICA="${APP_URL_PUBLICA:-$RENDER_EXTERNAL_URL}"
@@ -98,11 +100,11 @@ else
   export AGUAVIGIA_SQL_HABILITADO="${AGUAVIGIA_SQL_HABILITADO:-false}"
 fi
 
-# 6. Seed ONLY the 211 official Cartagena neighborhoods (no demo/simulated cuts or reports)
+# 6. Seed ONLY the 211 official Cartagena neighborhoods + provision Veedor & Admin accounts after backend boots
 (
   sleep 4
   if [ -n "$MONGODB_URI" ]; then
-    echo "[4/5] Seeding 211 official Cartagena neighborhoods in MongoDB (100% real mode, no demo scripts)..."
+    echo "[4/5] Seeding 211 official Cartagena neighborhoods in MongoDB (100% real mode)..."
     cd /app/scripts
     node -e '
       import("mongodb").then(async ({ MongoClient }) => {
@@ -123,10 +125,47 @@ fi
         }
       });
     '
+    # Wait for Spring Boot to initialize and create initial ADMIN, then ensure Veedor account exists
+    for i in $(seq 1 60); do
+      if curl -sf http://127.0.0.1:8080/actuator/health/readiness >/dev/null 2>&1; then
+        cd /app/scripts
+        node -e '
+          import("mongodb").then(async ({ MongoClient }) => {
+            const { randomUUID } = await import("node:crypto");
+            const client = new MongoClient(process.env.MONGODB_URI);
+            await client.connect();
+            const db = client.db(process.env.MONGODB_DB || "aguavigia");
+            const usuarios = db.collection("usuarios");
+            const hash = "$2a$10$dqqSwYzfwllDaE36FvWeheIE6paV6KGtF8EBg4NkpOHGNUH7O68Ce";
+            const now = new Date();
+            await usuarios.updateOne(
+              { correo: "admin@aguavigia.local" },
+              {
+                $set: { claveHash: hash, estado: "ACTIVA", rol: "ADMIN", actualizadoEn: now },
+                $setOnInsert: { _id: randomUUID(), nombre: "Administrador Principal", permisosConcedidos: [], permisosRevocados: [], creadoEn: now }
+              },
+              { upsert: true }
+            );
+            await usuarios.updateOne(
+              { correo: "veedor@aguavigia.local" },
+              {
+                $set: { claveHash: hash, estado: "ACTIVA", rol: "VEEDOR", actualizadoEn: now },
+                $setOnInsert: { _id: randomUUID(), nombre: "Veedor Ciudadano", permisosConcedidos: [], permisosRevocados: [], creadoEn: now }
+              },
+              { upsert: true }
+            );
+            console.log("[Auth] Cuentas veedor@aguavigia.local (sin 2FA) y admin@aguavigia.local (con 2FA) habilitadas.");
+            await client.close();
+          });
+        '
+        break
+      fi
+      sleep 5
+    done
   fi
 ) &
 
-# 7. Start Spring Boot Backend with live Acuacar API (INGESTA_MODO=auto) and 45-day validity window for last month's bulletins
+# 7. Start Spring Boot Backend with live Acuacar API (INGESTA_MODO=auto) and 45-day validity window
 echo "[5/5] Starting Spring Boot Backend in REAL mode (INGESTA_MODO=auto) on 127.0.0.1:8080..."
 cd /app
 DEFAULT_JAVA_OPTS="-Xms64m -Xmx215m -XX:MaxMetaspaceSize=128m -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Xss256k -Daguavigia.mongo.max-pool=8 -Daguavigia.ingesta.modo=auto -Daguavigia.ingesta.acuacar.tamanio-pagina=40 -Daguavigia.estado.expira-tras-fin-horas=1080 -Daguavigia.ingesta.compuertas.maximo-de-barrios=215 -Daguavigia.ingesta.compuertas.confianza-minima=0.45 -Daguavigia.ingesta.compuertas.confianza-minima-restablecimiento=0.45 -Daguavigia.ingesta.compuertas.duracion-maxima-horas=240 -Daguavigia.ingesta.compuertas.margen-de-inicio-dias=45 -Daguavigia.siembra.vecinos-sinteticos=0 -Daguavigia.sql.copia-retraso-inicial-ms=20000 -Daguavigia.ingesta.retraso-inicial-ms=35000"
