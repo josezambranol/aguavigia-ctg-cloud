@@ -34,11 +34,12 @@ export VEEDOR_PASSWORD_HASH='$2a$10$dqqSwYzfwllDaE36FvWeheIE6paV6KGtF8EBg4NkpOHG
 if [ -n "$RENDER_EXTERNAL_URL" ]; then
   export APP_URL_PUBLICA="${APP_URL_PUBLICA:-$RENDER_EXTERNAL_URL}"
   export APP_URL_FRONTEND="${APP_URL_FRONTEND:-$RENDER_EXTERNAL_URL}"
+  export AGUAVIGIA_APP_URL_PUBLICA="$APP_URL_PUBLICA"
+  export AGUAVIGIA_APP_URL_FRONTEND="$APP_URL_FRONTEND"
   export CORS_ORIGENES="${CORS_ORIGENES:-$RENDER_EXTERNAL_URL,http://localhost:5173}"
-elif [ -n "$SPACE_HOST" ]; then
-  export APP_URL_PUBLICA="https://${SPACE_HOST}"
-  export APP_URL_FRONTEND="https://${SPACE_HOST}"
-  export CORS_ORIGENES="https://${SPACE_HOST},http://localhost:5173"
+else
+  export AGUAVIGIA_APP_URL_PUBLICA="https://aguavigia-ctg.onrender.com"
+  export AGUAVIGIA_APP_URL_FRONTEND="https://aguavigia-ctg.onrender.com"
 fi
 
 # 4. If MONGODB_URI is not set and local mongod is available, start embedded MongoDB Replica Set

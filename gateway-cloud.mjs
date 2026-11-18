@@ -12,9 +12,117 @@ const BACKEND_HOST = process.env.BACKEND_HOST || '127.0.0.1';
 const BACKEND_PORT = Number(process.env.BACKEND_PORT || 8080);
 const SMTP_PORT = Number(process.env.SMTP_PORT || 1025);
 
-// In-memory mailbox for captured SMTP messages (replaces Mailhog in cloud with 0 extra RAM)
 const capturedEmails = [];
 const MAX_EMAILS = 50;
+
+function decodeQuotedPrintable(str) {
+  const unfolded = str.replace(/=\r?\n/g, '');
+  const bytes = [];
+  for (let i = 0; i < unfolded.length; i++) {
+    if (unfolded[i] === '=' && /^[0-9A-Fa-f]{2}$/.test(unfolded.slice(i + 1, i + 3))) {
+      bytes.push(parseInt(unfolded.slice(i + 1, i + 3), 16));
+      i += 2;
+    } else {
+      bytes.push(unfolded.charCodeAt(i));
+    }
+  }
+  return Buffer.from(bytes).toString('utf8');
+}
+
+function decodeMimeWords(str) {
+  if (!str) return '';
+  return str.replace(/=\?([^?]+)\?([BQbq])\?([^?]+)\?=/g, (_, _charset, encoding, text) => {
+    if (encoding.toUpperCase() === 'B') {
+      return Buffer.from(text, 'base64').toString('utf8');
+    }
+    return decodeQuotedPrintable(text.replace(/_/g, ' '));
+  });
+}
+
+function parseRawEmail(raw, publicOrigin) {
+  const splitIdx = raw.indexOf('\n\n');
+  const headerPart = splitIdx !== -1 ? raw.slice(0, splitIdx) : raw;
+  let bodyPart = splitIdx !== -1 ? raw.slice(splitIdx + 2) : '';
+
+  const unfoldedHeaders = headerPart.replace(/\r?\n[ \t]+/g, ' ');
+  const subjectMatch = unfoldedHeaders.match(/^Subject:\s*(.+)$/im);
+  const subject = subjectMatch ? decodeMimeWords(subjectMatch[1].trim()) : 'Correo de AguaVigía CTG';
+
+  // Extract HTML part if multipart or quoted-printable
+  let html = bodyPart;
+  const htmlSectionMatch = bodyPart.match(/Content-Type:\s*text\/html[\s\S]*?\n\n([\s\S]*?)(?:\n--[^\n]+|$)/i);
+  if (htmlSectionMatch) {
+    html = htmlSectionMatch[1];
+  }
+  html = decodeQuotedPrintable(html);
+  const htmlStart = html.search(/<!DOCTYPE|<html|<div|<table|<p/i);
+  if (htmlStart > 0) {
+    html = html.slice(htmlStart);
+  }
+  if (publicOrigin) {
+    html = html.replace(/https?:\/\/localhost:(?:8080|8081|5173|4173)/g, publicOrigin);
+  }
+  return { subject, html };
+}
+
+function renderMailhogHtml(emails, publicOrigin) {
+  const itemsHtml =
+    emails.length === 0
+      ? `<div class="empty">No hay correos recibidos todavía. Cuando registres una cuenta o pidas un aviso en AguaVigía, el correo aparecerá aquí al instante con su botón de activación.</div>`
+      : emails
+          .map((mail, idx) => {
+            const { subject, html } = parseRawEmail(mail.raw, publicOrigin);
+            const toList = mail.to.join(', ').replace(/[<>]/g, '');
+            const time = new Date(mail.createdAt).toLocaleTimeString('es-CO');
+            return `
+            <div class="mail-card">
+              <div class="mail-header">
+                <div>
+                  <span class="badge">Correo #${emails.length - idx}</span>
+                  <strong class="subject">${subject}</strong>
+                </div>
+                <div class="meta">Para: <b>${toList}</b> · ${time}</div>
+              </div>
+              <div class="mail-body">${html}</div>
+            </div>`;
+          })
+          .join('\n');
+
+  return `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mailhog · Buzón de Correos AguaVigía CTG</title>
+  <style>
+    body { margin: 0; font-family: system-ui, -apple-system, sans-serif; background: #0f1416; color: #e7ecee; }
+    header { display: flex; align-items: center; justify-content: space-between; padding: 14px 24px; background: #161d20; border-bottom: 1px solid #263238; }
+    header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+    header .actions a { color: #7dd3fc; text-decoration: none; font-size: 14px; margin-left: 16px; padding: 6px 12px; border: 1px solid #334155; border-radius: 6px; }
+    .container { max-width: 920px; margin: 24px auto; padding: 0 16px; }
+    .empty { padding: 40px; text-align: center; background: #161d20; border: 1px dashed #334155; border-radius: 10px; color: #94a3b8; }
+    .mail-card { background: #161d20; border: 1px solid #263238; border-radius: 10px; margin-bottom: 24px; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,0.3); }
+    .mail-header { padding: 14px 20px; background: #1c2529; border-bottom: 1px solid #263238; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; }
+    .badge { background: #0284c7; color: #fff; font-size: 12px; font-weight: 600; padding: 3px 8px; border-radius: 4px; margin-right: 10px; }
+    .subject { font-size: 16px; color: #f8fafc; }
+    .meta { font-size: 13px; color: #94a3b8; }
+    .mail-body { padding: 20px; background: #ffffff; color: #111827; overflow-x: auto; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>📬 Buzón Mailhog · AguaVigía Cartagena (${emails.length} correo${emails.length === 1 ? '' : 's'})</h1>
+    <div class="actions">
+      <a href="/mailhog">🔄 Actualizar bandeja</a>
+      <a href="/">← Volver al mapa de AguaVigía</a>
+    </div>
+  </header>
+  <div class="container">
+    ${itemsHtml}
+  </div>
+</body>
+</html>`;
+}
 
 const smtpServer = net.createServer((socket) => {
   socket.write('220 aguavigia-smtp ESMTP ready\r\n');
@@ -233,7 +341,8 @@ function serveFile(req, res, filePath) {
 }
 
 const server = http.createServer((req, res) => {
-  const urlPath = (req.url || '/').split('?')[0];
+  const rawUrl = req.url || '/';
+  const [urlPath, queryString = ''] = rawUrl.split('?');
 
   if (urlPath === '/healthz') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -242,8 +351,19 @@ const server = http.createServer((req, res) => {
   }
 
   if (urlPath === '/mailhog' || urlPath === '/mailhog/') {
-    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({ total: capturedEmails.length, messages: capturedEmails }, null, 2));
+    const wantsJson =
+      queryString.includes('format=json') ||
+      (req.headers.accept && req.headers.accept.includes('application/json') && !req.headers.accept.includes('text/html'));
+    if (wantsJson) {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ total: capturedEmails.length, messages: capturedEmails }, null, 2));
+      return;
+    }
+    const proto = req.headers['x-forwarded-proto'] || 'https';
+    const host = req.headers.host || 'aguavigia-ctg.onrender.com';
+    const publicOrigin = `${proto}://${host}`;
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
+    res.end(renderMailhogHtml(capturedEmails, publicOrigin));
     return;
   }
 
@@ -272,7 +392,6 @@ const server = http.createServer((req, res) => {
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`[Gateway] AguaVigía CTG listening on http://0.0.0.0:${PORT} -> backend ${BACKEND_HOST}:${BACKEND_PORT}`);
 
-  // Automatic external self-ping every 9 minutes so Render / HuggingFace free instances never sleep
   const publicUrl =
     process.env.RENDER_EXTERNAL_URL ||
     process.env.APP_URL_PUBLICA ||
