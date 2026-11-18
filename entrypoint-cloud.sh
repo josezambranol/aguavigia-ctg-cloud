@@ -23,10 +23,10 @@ export REDIS_PORT="${REDIS_PORT:-6379}"
 export MAIL_HOST="${MAIL_HOST:-127.0.0.1}"
 export MAIL_PORT="${MAIL_PORT:-1025}"
 export COLLECTOR_USER_AGENT="${COLLECTOR_USER_AGENT:-AguaVigiaCTG-Bot/1.0 (+alertas@aguavigia.com)}"
-export INGESTA_MODO="${INGESTA_MODO:-local}"
-export VECINOS_SINTETICOS="${VECINOS_SINTETICOS:-25}"
-export AGUAVIGIA_CONSENSO_REDES_MINIMAS="${AGUAVIGIA_CONSENSO_REDES_MINIMAS:-1}"
-export RATE_LIMIT_FACTOR="${RATE_LIMIT_FACTOR:-100}"
+export INGESTA_MODO="${CLOUD_INGESTA_MODO:-local}"
+export VECINOS_SINTETICOS="${CLOUD_VECINOS_SINTETICOS:-25}"
+export AGUAVIGIA_CONSENSO_REDES_MINIMAS="1"
+export RATE_LIMIT_FACTOR="100"
 
 if [ -n "$RENDER_EXTERNAL_URL" ]; then
   export APP_URL_PUBLICA="${APP_URL_PUBLICA:-$RENDER_EXTERNAL_URL}"
@@ -143,10 +143,10 @@ fi
 echo "[5/5] Starting Spring Boot Backend on 127.0.0.1:8080..."
 cd /app
 DEFAULT_JAVA_OPTS="-Xms64m -Xmx220m -XX:MaxMetaspaceSize=88m -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Xss256k -Daguavigia.mongo.max-pool=8 -Daguavigia.sql.copia-retraso-inicial-ms=25000 -Daguavigia.ingesta.retraso-inicial-ms=15000"
-JAVA_MEM_OPTS="${JAVA_MEM_OPTS:-$DEFAULT_JAVA_OPTS}"
+JAVA_RUN_OPTS="${CLOUD_JAVA_OPTS:-$DEFAULT_JAVA_OPTS}"
 
 while true; do
-  java $JAVA_MEM_OPTS -jar /app/app.jar
+  java $JAVA_RUN_OPTS -jar /app/app.jar
   EXIT_CODE=$?
   echo "[Supervisor] Spring Boot exited with code $EXIT_CODE. Restarting in 3s..."
   sleep 3
