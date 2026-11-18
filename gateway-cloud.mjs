@@ -271,4 +271,18 @@ const server = http.createServer((req, res) => {
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`[Gateway] AguaVigía CTG listening on http://0.0.0.0:${PORT} -> backend ${BACKEND_HOST}:${BACKEND_PORT}`);
+
+  // Automatic external self-ping every 9 minutes so Render / HuggingFace free instances never sleep
+  const publicUrl =
+    process.env.RENDER_EXTERNAL_URL ||
+    process.env.APP_URL_PUBLICA ||
+    (process.env.SPACE_HOST ? `https://${process.env.SPACE_HOST}` : null);
+
+  if (publicUrl && publicUrl.startsWith('http')) {
+    console.log(`[Gateway] Auto keep-alive enabled for ${publicUrl}/healthz (every 9 min)`);
+    setInterval(() => {
+      const client = publicUrl.startsWith('https') ? https : http;
+      client.get(`${publicUrl.replace(/\/$/, '')}/healthz`, (res) => res.resume()).on('error', () => {});
+    }, 9 * 60 * 1000);
+  }
 });

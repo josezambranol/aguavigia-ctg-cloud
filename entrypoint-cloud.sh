@@ -8,11 +8,11 @@ export PORT="${PORT:-7860}"
 export BACKEND_HOST="127.0.0.1"
 export BACKEND_PORT="8080"
 export DIST_DIR="/app/dist"
-node /app/gateway-cloud.mjs &
+node --max-old-space-size=48 /app/gateway-cloud.mjs &
 
 # 2. Start embedded Redis on 127.0.0.1:6379
 echo "[1/5] Starting embedded Redis on 127.0.0.1:6379..."
-redis-server --bind 127.0.0.1 --port 6379 --daemonize yes --save "" --appendonly no --maxmemory 24mb --maxmemory-policy allkeys-lru --dir /tmp
+redis-server --bind 127.0.0.1 --port 6379 --daemonize yes --save "" --appendonly no --maxmemory 12mb --maxmemory-policy allkeys-lru --dir /tmp
 
 # 3. Configure defaults for Spring Boot
 export SPRING_PROFILES_ACTIVE="${SPRING_PROFILES_ACTIVE:-docker}"
@@ -41,7 +41,7 @@ fi
 if [ -z "$MONGODB_URI" ] && command -v mongod >/dev/null 2>&1; then
   echo "[2/5] Starting embedded MongoDB 7.0 Replica Set (rs0)..."
   mkdir -p /tmp/mongo-data
-  mongod --dbpath /tmp/mongo-data --replSet rs0 --bind_ip 127.0.0.1 --port 27017 --wiredTigerCacheSizeGB 0.25 --fork --logpath /tmp/mongod.log
+  mongod --dbpath /tmp/mongo-data --replSet rs0 --bind_ip 127.0.0.1 --port 27017 --wiredTigerCacheSizeGB 0.06 --fork --logpath /tmp/mongod.log
   cd /app/scripts
   node -e '
     import("mongodb").then(async ({ MongoClient }) => {
@@ -70,15 +70,16 @@ if [ -z "$AGUAVIGIA_SQL_URL" ] && [ -n "$PG_BIN" ]; then
   echo "[3/5] Starting embedded PostgreSQL analytical database..."
   export PATH="$PG_BIN:$PATH"
   mkdir -p /tmp/pgdata /tmp/pgrun
+  PG_OPTS="-k /tmp/pgrun -h 127.0.0.1 -p 5432 -c shared_buffers=16MB -c work_mem=2MB -c max_connections=15"
   if [ "$(id -u)" = "0" ]; then
     chown -R postgres:postgres /tmp/pgdata /tmp/pgrun
     su - postgres -c "$PG_BIN/initdb -D /tmp/pgdata --auth=trust >/dev/null 2>&1 || true"
-    su - postgres -c "$PG_BIN/pg_ctl -D /tmp/pgdata -l /tmp/pg.log -o '-k /tmp/pgrun -h 127.0.0.1 -p 5432' start" || true
+    su - postgres -c "$PG_BIN/pg_ctl -D /tmp/pgdata -l /tmp/pg.log -o '$PG_OPTS' start" || true
     su - postgres -c "$PG_BIN/psql -h 127.0.0.1 -p 5432 -c 'CREATE USER aguavigia WITH SUPERUSER;' postgres >/dev/null 2>&1 || true"
     su - postgres -c "$PG_BIN/createdb -h 127.0.0.1 -p 5432 -O aguavigia aguavigia_analitica >/dev/null 2>&1 || true"
   else
     "$PG_BIN/initdb" -D /tmp/pgdata --auth=trust -U aguavigia >/dev/null 2>&1 || true
-    "$PG_BIN/pg_ctl" -D /tmp/pgdata -l /tmp/pg.log -o "-k /tmp/pgrun -h 127.0.0.1 -p 5432" start || true
+    "$PG_BIN/pg_ctl" -D /tmp/pgdata -l /tmp/pg.log -o "$PG_OPTS" start || true
     "$PG_BIN/createdb" -h 127.0.0.1 -p 5432 -U aguavigia aguavigia_analitica >/dev/null 2>&1 || true
   fi
   export AGUAVIGIA_SQL_HABILITADO="true"
@@ -121,5 +122,5 @@ fi
 # 7. Start Spring Boot Backend
 echo "[5/5] Starting Spring Boot Backend on 127.0.0.1:8080..."
 cd /app
-JAVA_MEM_OPTS="${JAVA_MEM_OPTS:--Xms128m -Xmx384m -XX:MaxMetaspaceSize=112m -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError}"
+JAVA_MEM_OPTS="${JAVA_MEM_OPTS:--Xms64m -Xmx195m -XX:MaxMetaspaceSize=84m -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Xss256k -XX:+ExitOnOutOfMemoryError}"
 exec java $JAVA_MEM_OPTS -jar /app/app.jar

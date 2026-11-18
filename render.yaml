@@ -16,4 +16,4 @@ services:
       - key: AGUAVIGIA_CONSENSO_REDES_MINIMAS
         value: "1"
       - key: JAVA_MEM_OPTS
-        value: "-Xms96m -Xmx260m -XX:MaxMetaspaceSize=88m -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError"
+        value: "-Xms64m -Xmx195m -XX:MaxMetaspaceSize=84m -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Xss256k -XX:+ExitOnOutOfMemoryError"
