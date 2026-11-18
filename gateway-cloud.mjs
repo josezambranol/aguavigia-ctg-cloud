@@ -46,9 +46,8 @@ function parseRawEmail(raw, publicOrigin) {
 
   const unfoldedHeaders = headerPart.replace(/\r?\n[ \t]+/g, ' ');
   const subjectMatch = unfoldedHeaders.match(/^Subject:\s*(.+)$/im);
-  const subject = subjectMatch ? decodeMimeWords(subjectMatch[1].trim()) : 'Correo de AguaVigía CTG';
+  const subject = subjectMatch ? decodeMimeWords(subjectMatch[1].trim()) : 'Aviso de AguaVigía CTG';
 
-  // Extract HTML part if multipart or quoted-printable
   let html = bodyPart;
   const htmlSectionMatch = bodyPart.match(/Content-Type:\s*text\/html[\s\S]*?\n\n([\s\S]*?)(?:\n--[^\n]+|$)/i);
   if (htmlSectionMatch) {
@@ -68,61 +67,346 @@ function parseRawEmail(raw, publicOrigin) {
 function renderMailhogHtml(emails, publicOrigin) {
   const itemsHtml =
     emails.length === 0
-      ? `<div class="empty">No hay correos recibidos todavía. Cuando registres una cuenta o pidas un aviso en AguaVigía, el correo aparecerá aquí al instante con su botón de activación.</div>`
+      ? `<article class="tarjeta vacio">
+          <p class="rotulo">Bandeja vacía</p>
+          <h2>Aún no han salido correos</h2>
+          <p class="bajada">Cuando alguien se registre como vecino en <strong>Mi cuenta</strong> o pida alertas en <strong>Avisos</strong>, el correo con el enlace de confirmación aparecerá aquí de inmediato.</p>
+          <div class="acciones-vacio">
+            <a class="boton-primario" href="/vecino/registro">Registrar cuenta de vecino <span>→</span></a>
+            <a class="boton-secundario" href="/avisos">Suscribirse a avisos</a>
+          </div>
+        </article>`
       : emails
           .map((mail, idx) => {
             const { subject, html } = parseRawEmail(mail.raw, publicOrigin);
             const toList = mail.to.join(', ').replace(/[<>]/g, '');
-            const time = new Date(mail.createdAt).toLocaleTimeString('es-CO');
+            const time = new Date(mail.createdAt).toLocaleTimeString('es-CO', {
+              hour: '2-digit',
+              minute: '2-digit',
+              second: '2-digit',
+            });
             return `
-            <div class="mail-card">
-              <div class="mail-header">
-                <div>
-                  <span class="badge">Correo #${emails.length - idx}</span>
-                  <strong class="subject">${subject}</strong>
+            <article class="tarjeta correo-item">
+              <header class="correo-cabecera">
+                <div class="correo-titular">
+                  <span class="etiqueta">Mensaje ${emails.length - idx}</span>
+                  <h2>${subject}</h2>
                 </div>
-                <div class="meta">Para: <b>${toList}</b> · ${time}</div>
-              </div>
-              <div class="mail-body">${html}</div>
-            </div>`;
+                <div class="correo-meta">
+                  <span>Destinatario: <strong>${toList}</strong></span>
+                  <span class="separador">·</span>
+                  <time>${time}</time>
+                </div>
+              </header>
+              <div class="correo-cuerpo">${html}</div>
+            </article>`;
           })
           .join('\n');
 
-  return `<!DOCTYPE html>
-<html lang="es">
+  return `<!doctype html>
+<html lang="es-CO">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Mailhog · Buzón de Correos AguaVigía CTG</title>
+  <meta name="color-scheme" content="light dark" />
+  <title>Buzón de correos · AguaVigía CTG</title>
   <style>
-    body { margin: 0; font-family: system-ui, -apple-system, sans-serif; background: #0f1416; color: #e7ecee; }
-    header { display: flex; align-items: center; justify-content: space-between; padding: 14px 24px; background: #161d20; border-bottom: 1px solid #263238; }
-    header h1 { margin: 0; font-size: 18px; font-weight: 600; }
-    header .actions a { color: #7dd3fc; text-decoration: none; font-size: 14px; margin-left: 16px; padding: 6px 12px; border: 1px solid #334155; border-radius: 6px; }
-    .container { max-width: 920px; margin: 24px auto; padding: 0 16px; }
-    .empty { padding: 40px; text-align: center; background: #161d20; border: 1px dashed #334155; border-radius: 10px; color: #94a3b8; }
-    .mail-card { background: #161d20; border: 1px solid #263238; border-radius: 10px; margin-bottom: 24px; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,0.3); }
-    .mail-header { padding: 14px 20px; background: #1c2529; border-bottom: 1px solid #263238; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; }
-    .badge { background: #0284c7; color: #fff; font-size: 12px; font-weight: 600; padding: 3px 8px; border-radius: 4px; margin-right: 10px; }
-    .subject { font-size: 16px; color: #f8fafc; }
-    .meta { font-size: 13px; color: #94a3b8; }
-    .mail-body { padding: 20px; background: #ffffff; color: #111827; overflow-x: auto; }
+    @font-face {
+      font-family: 'Newsreader';
+      src: url('/fuentes/newsreader-latin-wght.woff2') format('woff2');
+      font-weight: 300 600;
+      font-style: normal;
+      font-display: swap;
+    }
+    :root {
+      color-scheme: light dark;
+      --papel: #f5f5f2;
+      --tarjeta: #ffffff;
+      --elevada: #ffffff;
+      --tinta: #15191c;
+      --tinta-2: #4a5157;
+      --tinta-3: #7b838a;
+      --linea: #dddcd6;
+      --linea-suave: #e9e8e3;
+      --cardenillo: #2f5f57;
+      --sobre-cardenillo: #ffffff;
+      --laton: #836430;
+      --fuente-marca: 'Newsreader', Georgia, 'Times New Roman', serif;
+      --fuente-cuerpo: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+      --margen: clamp(16px, 4vw, 48px);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --papel: #111719;
+        --tarjeta: #1a1f22;
+        --elevada: #242c2f;
+        --tinta: #f1f4f2;
+        --tinta-2: #b1bbbd;
+        --tinta-3: #7e888c;
+        --linea: #354044;
+        --linea-suave: #283135;
+        --cardenillo: #8cc8b8;
+        --sobre-cardenillo: #111719;
+        --laton: #c9a567;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--papel);
+      color: var(--tinta);
+      font-family: var(--fuente-cuerpo);
+      font-size: 1rem;
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+    .cabecera {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 1rem;
+      padding: 0.875rem var(--margen);
+      background: var(--papel);
+      border-bottom: 1px solid var(--linea);
+    }
+    .marca {
+      display: inline-flex;
+      align-items: baseline;
+      gap: 0.5rem;
+      color: var(--tinta);
+      text-decoration: none;
+      font-family: var(--fuente-marca);
+      font-size: 1.5rem;
+      font-weight: 500;
+      letter-spacing: -0.01em;
+    }
+    .ciudad {
+      font-family: var(--fuente-cuerpo);
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--tinta-2);
+    }
+    .navegacion {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1.25rem;
+    }
+    .navegacion a {
+      color: var(--tinta-2);
+      text-decoration: none;
+      font-size: 0.9375rem;
+      padding: 0.25rem 0;
+      border-bottom: 2px solid transparent;
+    }
+    .navegacion a:hover {
+      color: var(--tinta);
+    }
+    .navegacion a[aria-current="page"] {
+      color: var(--tinta);
+      font-weight: 600;
+      border-bottom-color: var(--laton);
+    }
+    .contenedor {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 2.5rem var(--margen) 4rem;
+      display: grid;
+      gap: 2rem;
+    }
+    .encabezado-pagina {
+      display: grid;
+      gap: 0.75rem;
+      border-bottom: 1px solid var(--linea);
+      padding-bottom: 1.75rem;
+    }
+    .filete {
+      width: 56px;
+      height: 3px;
+      border-radius: 999px;
+      background: var(--laton);
+    }
+    .rotulo {
+      margin: 0;
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--tinta-2);
+    }
+    h1 {
+      margin: 0;
+      font-family: var(--fuente-marca);
+      font-weight: 400;
+      font-size: clamp(2rem, 4vw, 3rem);
+      line-height: 1.08;
+      letter-spacing: -0.02em;
+    }
+    .bajada {
+      margin: 0;
+      color: var(--tinta-2);
+      font-size: 1.0625rem;
+      max-width: 65ch;
+    }
+    .barra-acciones {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 1rem;
+      margin-top: 0.5rem;
+    }
+    .boton-primario, .boton-secundario {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.625rem;
+      min-height: 44px;
+      padding: 0 1.25rem;
+      border-radius: 999px;
+      font-size: 0.9375rem;
+      font-weight: 600;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .boton-primario {
+      background: var(--cardenillo);
+      color: var(--sobre-cardenillo);
+      border: 1px solid var(--cardenillo);
+    }
+    .boton-secundario {
+      background: transparent;
+      color: var(--tinta);
+      border: 1px solid var(--linea);
+    }
+    .boton-secundario:hover {
+      border-color: var(--laton);
+    }
+    .tarjeta {
+      background: var(--tarjeta);
+      border: 1px solid var(--linea);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .vacio {
+      padding: 2.5rem;
+      display: grid;
+      gap: 0.75rem;
+    }
+    .vacio h2 {
+      margin: 0;
+      font-family: var(--fuente-marca);
+      font-weight: 400;
+      font-size: 1.75rem;
+    }
+    .acciones-vacio {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      margin-top: 0.75rem;
+    }
+    .correo-cabecera {
+      padding: 1.25rem 1.5rem;
+      background: color-mix(in srgb, var(--cardenillo) 7%, var(--tarjeta));
+      border-bottom: 1px solid var(--linea);
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 0.75rem;
+    }
+    .correo-titular {
+      display: flex;
+      align-items: baseline;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+    }
+    .correo-titular h2 {
+      margin: 0;
+      font-family: var(--fuente-marca);
+      font-weight: 500;
+      font-size: 1.35rem;
+    }
+    .etiqueta {
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 0.2rem 0.65rem;
+      border-radius: 999px;
+      border: 1px solid var(--linea);
+      color: var(--tinta-2);
+    }
+    .correo-meta {
+      font-size: 0.875rem;
+      color: var(--tinta-2);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .correo-cuerpo {
+      padding: 1.5rem;
+      background: var(--papel);
+      overflow-x: auto;
+    }
   </style>
 </head>
 <body>
-  <header>
-    <h1>📬 Buzón Mailhog · AguaVigía Cartagena (${emails.length} correo${emails.length === 1 ? '' : 's'})</h1>
-    <div class="actions">
-      <a href="/mailhog">🔄 Actualizar bandeja</a>
-      <a href="/">← Volver al mapa de AguaVigía</a>
-    </div>
+  <header class="cabecera">
+    <a class="marca" href="/">AguaVigía <span class="ciudad">Cartagena</span></a>
+    <nav class="navegacion" aria-label="Principal">
+      <a href="/">Mapa</a>
+      <a href="/cumplimiento">Cumplimiento</a>
+      <a href="/bitacora">Bitácora</a>
+      <a href="/estadisticas">Estadísticas</a>
+      <a href="/avisos">Avisos</a>
+      <a href="/mailhog" aria-current="page">Buzón SMTP (${emails.length})</a>
+      <a href="/vecino/ingreso">Mi cuenta</a>
+      <a href="/panel/ingreso">Acceso al panel</a>
+    </nav>
   </header>
-  <div class="container">
+  <main class="contenedor">
+    <section class="encabezado-pagina">
+      <div class="filete"></div>
+      <p class="rotulo">Buzón de verificación · Entorno académico (Mailhog)</p>
+      <h1>Correos enviados por la plataforma</h1>
+      <p class="bajada">Aquí llegan al instante los enlaces de activación de cuentas de vecino, restablecimiento de clave y confirmación de suscripciones sin depender de proveedores de correo externos.</p>
+      <div class="barra-acciones">
+        <span class="rotulo">${emails.length} mensaje${emails.length === 1 ? '' : 's'} en bandeja</span>
+        <div style="display:flex; gap:0.75rem; flex-wrap:wrap;">
+          <a class="boton-secundario" href="/mailhog">Actualizar bandeja</a>
+          <a class="boton-primario" href="/">Volver al mapa <span>→</span></a>
+        </div>
+      </div>
+    </section>
     ${itemsHtml}
-  </div>
+  </main>
 </body>
 </html>`;
 }
+
+const HELPER_SCRIPT = `<script>
+(function(){
+  const observer = new MutationObserver(() => {
+    if (document.getElementById('aguavigia-mailhog-cta')) return;
+    const text = document.body ? document.body.innerText : '';
+    if (text.includes('Revisa tu correo') || text.includes('Te enviamos un enlace')) {
+      const main = document.querySelector('main') || document.body;
+      const box = document.createElement('div');
+      box.id = 'aguavigia-mailhog-cta';
+      box.style.cssText = 'margin: 1.25rem auto; max-width: 420px; padding: 1rem 1.25rem; border: 1px solid #354044; border-radius: 12px; background: rgba(140,200,184,0.08); display: grid; gap: 0.65rem;';
+      box.innerHTML = '<span style="font-size:0.75rem;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;opacity:0.8;">Buzón integrado del servidor</span>' +
+        '<span style="font-size:0.9375rem;">Abre aquí mismo el correo que acaba de enviarte AguaVigía para hacer clic en el botón de validación:</span>' +
+        '<a href="/mailhog" style="display:inline-flex;align-items:center;justify-content:space-between;min-height:46px;padding:0 1.25rem;border-radius:999px;background:#8cc8b8;color:#111719;font-weight:600;text-decoration:none;">Abrir buzón para validar mi correo <span>→</span></a>';
+      const target = main.querySelector('form, article, section, div') || main;
+      target.appendChild(box);
+    }
+  });
+  window.addEventListener('DOMContentLoaded', () => observer.observe(document.body, { childList: true, subtree: true }));
+})();
+</script>`;
 
 const smtpServer = net.createServer((socket) => {
   socket.write('220 aguavigia-smtp ESMTP ready\r\n');
@@ -279,22 +563,31 @@ function proxyAcuacarMedia(req, res) {
   req.pipe(proxyReq);
 }
 
+function serveIndexHtml(res) {
+  const indexHtml = path.join(DIST_DIR, 'index.html');
+  fs.readFile(indexHtml, 'utf8', (readErr, content) => {
+    if (readErr) {
+      res.writeHead(404);
+      res.end('Not found');
+      return;
+    }
+    const injected = content.replace('</body>', `${HELPER_SCRIPT}</body>`);
+    res.writeHead(200, {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-cache',
+    });
+    res.end(injected);
+  });
+}
+
 function serveFile(req, res, filePath) {
   fs.stat(filePath, (err, stat) => {
     if (err || !stat.isFile()) {
-      const indexHtml = path.join(DIST_DIR, 'index.html');
-      fs.readFile(indexHtml, (readErr, content) => {
-        if (readErr) {
-          res.writeHead(404);
-          res.end('Not found');
-          return;
-        }
-        res.writeHead(200, {
-          'Content-Type': 'text/html; charset=utf-8',
-          'Cache-Control': 'no-cache',
-        });
-        res.end(content);
-      });
+      serveIndexHtml(res);
+      return;
+    }
+    if (path.basename(filePath) === 'index.html') {
+      serveIndexHtml(res);
       return;
     }
 
