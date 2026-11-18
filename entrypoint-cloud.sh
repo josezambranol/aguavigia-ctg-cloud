@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-echo "=== [AguaVigia CTG Cloud] Starting unified server ==="
+echo "=== [AguaVigia CTG Cloud] Starting unified server (100% REAL LIVE DATA MODE) ==="
 export MALLOC_ARENA_MAX=1
 
 # 1. Start Gateway + Built-in SMTP (1025) + SPA Server on $PORT immediately
@@ -15,18 +15,19 @@ node --max-old-space-size=40 /app/gateway-cloud.mjs &
 echo "[1/5] Starting embedded Redis on 127.0.0.1:6379..."
 redis-server --bind 127.0.0.1 --port 6379 --daemonize yes --save "" --appendonly no --maxmemory 10mb --maxmemory-policy allkeys-lru --dir /tmp
 
-# 3. Configure defaults for Spring Boot (optimized for 512MB RAM cloud container)
-export SPRING_PROFILES_ACTIVE="${SPRING_PROFILES_ACTIVE:-docker}"
+# 3. Configure defaults for Spring Boot (100% Real Live Data Mode: INGESTA_MODO=auto, no synthetic cuts/reports)
+export SPRING_PROFILES_ACTIVE="docker"
 export SERVER_PORT="8080"
 export REDIS_HOST="${REDIS_HOST:-127.0.0.1}"
 export REDIS_PORT="${REDIS_PORT:-6379}"
 export MAIL_HOST="${MAIL_HOST:-127.0.0.1}"
 export MAIL_PORT="${MAIL_PORT:-1025}"
 export COLLECTOR_USER_AGENT="${COLLECTOR_USER_AGENT:-AguaVigiaCTG-Bot/1.0 (+alertas@aguavigia.com)}"
-export INGESTA_MODO="${CLOUD_INGESTA_MODO:-local}"
-export VECINOS_SINTETICOS="${CLOUD_VECINOS_SINTETICOS:-25}"
+export INGESTA_MODO="auto"
+export VECINOS_SINTETICOS="0"
+export AGUAVIGIA_MODO="REAL"
 export AGUAVIGIA_CONSENSO_REDES_MINIMAS="1"
-export RATE_LIMIT_FACTOR="100"
+export RATE_LIMIT_FACTOR="1"
 
 if [ -n "$RENDER_EXTERNAL_URL" ]; then
   export APP_URL_PUBLICA="${APP_URL_PUBLICA:-$RENDER_EXTERNAL_URL}"
@@ -97,11 +98,11 @@ else
   export AGUAVIGIA_SQL_HABILITADO="${AGUAVIGIA_SQL_HABILITADO:-false}"
 fi
 
-# 6. Seed the 211 neighborhoods + historical cuts + live consensus demo in background
+# 6. Seed ONLY the 211 real Cartagena neighborhoods (catastro/DANE) — NO synthetic cuts or demo reports
 (
   sleep 4
   if [ -n "$MONGODB_URI" ]; then
-    echo "[4/5] Checking / seeding 211 Cartagena neighborhoods in MongoDB..."
+    echo "[4/5] Seeding 211 official Cartagena neighborhoods in MongoDB (no demo/synthetic data)..."
     cd /app/scripts
     node -e '
       import("mongodb").then(async ({ MongoClient }) => {
@@ -112,37 +113,24 @@ fi
           await client.connect();
           const db = client.db(dbName);
           const count = await db.collection("sectores").countDocuments();
-          const cortesCount = await db.collection("cortes").countDocuments();
-          console.log("[Seeder] Existing sectors:", count, "Existing cuts:", cortesCount);
+          console.log("[Seeder] Existing sectors:", count);
           await client.close();
-          const { spawnSync } = await import("node:child_process");
           if (count < 211) {
+            const { spawnSync } = await import("node:child_process");
             spawnSync("node", ["sembrar-sectores.mjs", "--permitir-remoto", "--sobre-datos-reales"], { stdio: "inherit" });
-          }
-          if (cortesCount === 0) {
-            spawnSync("node", ["sembrar-historico-cortes.mjs", "--permitir-remoto", "--sobre-datos-reales"], { stdio: "inherit" });
           }
         } catch (err) {
           console.error("[Seeder] Warning:", err.message);
         }
       });
     '
-    # Wait for Spring Boot to listen on 127.0.0.1:8080, then seed live citizen consensus on 4 neighborhoods
-    for i in $(seq 1 60); do
-      if curl -sf http://127.0.0.1:8080/actuator/health/readiness >/dev/null 2>&1; then
-        echo "[Seeder] Backend is ready! Running live citizen consensus demo (sembrar-demo.mjs)..."
-        API_URL="http://127.0.0.1:8080" node /app/scripts/sembrar-demo.mjs --sin-agua 2 --presion-baja 2 || true
-        break
-      fi
-      sleep 5
-    done
   fi
 ) &
 
-# 7. Start Spring Boot Backend with supervisor loop
-echo "[5/5] Starting Spring Boot Backend on 127.0.0.1:8080..."
+# 7. Start Spring Boot Backend with live Acuacar & press ingestion (INGESTA_MODO=auto)
+echo "[5/5] Starting Spring Boot Backend in REAL mode (INGESTA_MODO=auto) on 127.0.0.1:8080..."
 cd /app
-DEFAULT_JAVA_OPTS="-Xms64m -Xmx220m -XX:MaxMetaspaceSize=88m -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Xss256k -Daguavigia.mongo.max-pool=8 -Daguavigia.sql.copia-retraso-inicial-ms=25000 -Daguavigia.ingesta.retraso-inicial-ms=15000"
+DEFAULT_JAVA_OPTS="-Xms64m -Xmx245m -XX:MaxMetaspaceSize=88m -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Xss256k -Daguavigia.mongo.max-pool=8 -Daguavigia.ingesta.modo=auto -Daguavigia.ingesta.acuacar.tamanio-pagina=25 -Daguavigia.siembra.vecinos-sinteticos=0 -Daguavigia.sql.copia-retraso-inicial-ms=30000 -Daguavigia.ingesta.retraso-inicial-ms=15000"
 JAVA_RUN_OPTS="${CLOUD_JAVA_OPTS:-$DEFAULT_JAVA_OPTS}"
 
 while true; do
