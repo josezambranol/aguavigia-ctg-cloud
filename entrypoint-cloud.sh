@@ -41,7 +41,7 @@ fi
 if [ -z "$MONGODB_URI" ] && command -v mongod >/dev/null 2>&1; then
   echo "[2/5] Starting embedded MongoDB 7.0 Replica Set (rs0)..."
   mkdir -p /tmp/mongo-data
-  mongod --dbpath /tmp/mongo-data --replSet rs0 --bind_ip 127.0.0.1 --port 27017 --wiredTigerCacheSizeGB 0.06 --fork --logpath /tmp/mongod.log
+  mongod --dbpath /tmp/mongo-data --replSet rs0 --bind_ip 127.0.0.1 --port 27017 --wiredTigerCacheSizeGB 0.25 --fork --logpath /tmp/mongod.log
   cd /app/scripts
   node -e '
     import("mongodb").then(async ({ MongoClient }) => {
